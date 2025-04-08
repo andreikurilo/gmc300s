@@ -55,6 +55,10 @@ class Gmc300:
         result = self._send_command(Commands.ENABLE_HEARTBEAT)
         self.is_heartbeat_enabled = result.status.value == CommandResult.Sent.value
     
+    def disable_heartbeat(self):
+        result = self._send_command(Commands.DISABLE_HEARTBEAT)
+        self.is_heartbeat_enabled = result.status.value == CommandResult.Sent.value
+    
     def _send_command(self, command: str):
         return self._serial.send_command(command=command)
     
@@ -79,17 +83,21 @@ class Gmc300:
         self._counter.add_cps(cps)
     
     def _get_counts_data(self, raw_data: bytes) -> int:
-        if len(raw_data) == 2:
-            raw_cps = (raw_data[0] << 8) | raw_data[1]  # Convert to int
+        if len(raw_data) >= 2:
+            chunk = raw_data[-2:]
+            raw_cps = (chunk[0] << 8) | chunk[1]  # Convert to int
             return raw_cps & 0x3FFF
-        else:
-            self.enable_heartbeat()
+        
         return 0
     
     def _subscribe(self):
         while not self.stop_event.is_set():
             connected = self._make_sure_connected()
             if not self.is_heartbeat_enabled:
+                self.disable_heartbeat()
+                if self._counter.is_empty():
+                    cpm = self.send_command(Commands.GET_CPM)
+                    self._counter.add_cps(cps=cpm['result'])
                 self.enable_heartbeat()
             
             if connected:

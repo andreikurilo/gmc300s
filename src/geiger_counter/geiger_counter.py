@@ -11,6 +11,9 @@ class GeigerCounter:
         self._cpm_buffer = deque(maxlen=CPM_LEN)
         self._cph_buffer = deque(maxlen=CPH_LEN)
     
+    def is_empty(self):
+        return len(self._cpm_buffer) == 0
+    
     def add_cps(self, cps: int):
         self._latest_cps = cps
         self._cpm_buffer.append(cps)
