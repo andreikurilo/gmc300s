@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  radiation-counter:
+    build: .
+    ports:
+      - "8000:5000"
+    restart: always
+    devices:
+      - "${SERIAL_PORT}:${SERIAL_PORT}"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - SERIAL_PORT=${SERIAL_PORT}
+      - BAUD_RATE=${BAUD_RATE}

@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Radiation Monitor</title>
+
+    <style>
+        .state {
+            width: 320px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .flex {
+            display: flex;
+            gap: 10px;
+        }
+
+        .flex-center {
+            align-items: center;
+        }
+
+        .chart {
+            flex-grow: 1;
+            padding: 20px;
+            min-width: 300px;
+        }
+
+        .container {
+            flex-direction: row;
+        }
+
+        @media (max-width: 768px) {
+            .flex.container {
+                flex-direction: column;
+                flex-wrap: wrap;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Radiation Monitor </h1>
+
+    <div class="flex container">
+        <div class="state">
+            <div class="flex">
+                <label>
+                    <input type="radio" name="option" value="true" onchange="handleRadioChange(this)">
+                    Play Sound
+                </label><br>
+
+                <label>
+                    <input type="radio" name="option" value="false" checked="checked"
+                        onchange="handleRadioChange(this)">
+                    Mute Sound
+                </label><br>
+            </div>
+
+            <canvas id="cpmGauge" width="200" height="200"></canvas>
+            <div class="flex flex-center">
+                <h2 title="Counts per minute">CPM: <span id="cpmValue">0</span></h2>
+                <h2 title="Counts per hour">CPH: <span id="cphValue">0</span></h2>
+                <h3 title="Counts per second">CPS: <span id="cpsValue">0</span></h3>
+            </div>
+
+            <div class="flex flex-center">
+                <h2 title="milliRoentgen per hour">mR/h: <span id="mRhValue">0</span></h2>
+                <h2 title="microsieverts per hour">uSv/h: <span id="uSvHValue">0</span></h2>
+            </div>
+        </div>
+
+        <div class="chart">
+            <h2>CPS over last five minutes</h2>
+            <canvas id="cphChart" width="300" height="100"></canvas>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <script>
+
+        let audioContext = null;
+        let playSound = false;
+
+        function handleRadioChange(radio) {
+            const value = radio.value;
+            if (value === 'true') {
+                initAudioContext();
+                playSound = true;
+            }
+            else {
+                playSound = false;
+            }
+        }
+
+        function initAudioContext() {
+            if (!audioContext || audioContext.state === 'closed') {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+        }
+
+        function playClick(startTime) {
+            const oscillator = audioContext.createOscillator();
+            const gain = audioContext.createGain();
+
+            oscillator.type = 'square';
+            oscillator.frequency.setValueAtTime(1000, startTime);
+
+            gain.gain.setValueAtTime(1, startTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.05);
+
+            oscillator.connect(gain);
+            gain.connect(audioContext.destination);
+
+            oscillator.start(startTime);
+            oscillator.stop(startTime + 0.05);
+        }
+
+        function playClicks(count) {
+            initAudioContext();
+            const interval = 0.1; 
+            const baseTime = audioContext.currentTime;
+
+            for (let i = 0; i < count; i++) {
+                const startTime = baseTime + i * interval;
+                playClick(startTime);
+            }
+        }
+
+        function countsToMilloRoentgenPerHour(cpm) {
+            return (cpm * 0.00065).toFixed(4)
+        }
+
+        let ctx = document.getElementById("cpmGauge").getContext("2d");
+        let gaugeChart = new Chart(ctx, {
+            type: "doughnut",
+            data: {
+                labels: ["CPM"],
+                datasets: [{
+                    data: [0, 300], 
+                    backgroundColor: ["green", "lightgrey"],
+                }]
+            },
+            options: {
+                circumference: 180, // half-circle
+                rotation: 270,      // start from bottom
+                cutout: "80%",      // thin gauge ring
+                responsive: false,
+                plugins: {
+                    legend: { display: false }
+                }
+            }
+        });
+
+        let cphCtx = document.getElementById("cphChart").getContext("2d");
+        let cphChart = new Chart(cphCtx, {
+            type: "line",
+            data: {
+                labels: [], 
+                datasets: [{
+                    label: "CPS over last hour",
+                    data: [],
+                    borderColor: "blue",
+                    backgroundColor: "rgba(0, 0, 255, 0.1)",
+                    fill: true,
+                    tension: 0.4  
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    x: {
+                        title: {
+                            display: true,
+                            text: "Seconds ago"
+                        },
+                        ticks: {
+                            autoSkip: true,
+                            maxTicksLimit: 10
+                        }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: "CPS"
+                        }
+                    }
+                }
+            }
+        });
+
+        function updateData() {
+            fetch("/state")
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById("cpmValue").innerText = data.cpm;
+                    document.getElementById("cphValue").innerText = data.cph;
+                    document.getElementById("cpsValue").innerText = data.cps;
+
+                    if (playSound)
+                        playClicks(data.cps);
+
+                    const mRh = countsToMilloRoentgenPerHour(data.cpm);
+                    document.getElementById("mRhValue").innerText = mRh;
+                    document.getElementById("uSvHValue").innerText = (mRh * 10).toFixed(4);
+
+                    let fillColor = "green";
+                    if (data.cpm >= 50 && data.cpm < 100) {
+                        fillColor = "yellow";
+                    } else if (data.cpm >= 100 && data.cpm < 1000) {
+                        fillColor = "lightcoral";  // light red
+                    } else if (data.cpm >= 1000 && data.cpm < 2000) {
+                        fillColor = "red";
+                    } else if (data.cpm >= 2000) {
+                        fillColor = "darkred";
+                    }
+
+                    let gaugeValue = data.cpm;
+                    if (gaugeValue > 300) {
+                        gaugeValue = 300;
+                    }
+
+                    gaugeChart.data.datasets[0].data = [gaugeValue, 300 - gaugeValue];
+                    gaugeChart.data.datasets[0].backgroundColor = [fillColor, "lightgrey"];
+                    gaugeChart.update();
+                });
+        }
+        setInterval(updateData, 1000);
+
+        function updateHourlyChart() {
+            fetch("/cph-buffer?count=300")
+                .then(response => response.json())
+                .then(bufferData => {
+                    let len = bufferData.length;
+                    let labels = [];
+                    for (let i = 0; i < len; i++) {
+                        labels.push(len - i - 1);
+                    }
+
+                    cphChart.data.labels = labels;
+                    cphChart.data.datasets[0].data = bufferData;
+                    cphChart.update();
+                });
+        }
+        setInterval(updateHourlyChart, 5000);
+    </script>
+</body>
+
+</html>
